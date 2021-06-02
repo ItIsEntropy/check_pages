@@ -7,6 +7,7 @@ import requests
 import logging
 import logging.config
 import urllib
+import asyncio
 from requests import status_codes
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
@@ -53,11 +54,6 @@ config = {
 }
 logging.config.dictConfig(config)
 log = logging.getLogger()#.getLogger(__name__)
-log.info('Info level test')
-log.debug('debug level prompt')
-log.warning('Things are serious, warning level test')
-log.error('yikes, error level message. maybe do something about it now?')
-log.critical("welp,it's too late now, critical failure message")
 
 # Variables:
 #           - Offline Sites list that will store offline sites.
@@ -71,7 +67,6 @@ broken_links: dict = {}
 hostname: str = ''
 
 def init(websites: List[str] = None):
-
     targets = websites if websites is not None else sites
 
     # make a folder for the screenshots
@@ -86,8 +81,8 @@ def init(websites: List[str] = None):
     driver = webdriver.Chrome(options = options)
     # Make a new folder with todays date - year (%Y), month(%m), and day(%d)
     today = (datetime.datetime.now().strftime("%Y%m%d"))
-    todays_photos: Path = make_dir(screenshots, name=today)        
-    check_sites(driver = driver, sites=targets[:2], path=todays_photos)
+    todays_photos: Path = make_dir(screenshots, name=today)
+    asyncio.run(check_sites(driver = driver, sites=targets[:2], path=todays_photos))
 
 def make_dir(parent: str, name: str) -> Path:
     '''
@@ -105,7 +100,7 @@ def make_dir(parent: str, name: str) -> Path:
         os.close()
     return dir
 
-def save_screenshot(driver = webdriver.Chrome, file_name: Path = Path('./img.png'), url: str = 'http://sh.gov.zm', include_scrollbar: bool = True) -> None:
+async def save_screenshot(driver = webdriver.Chrome, file_name: Path = Path('./img.png'), url: str = 'http://sh.gov.zm', include_scrollbar: bool = True) -> None:
     '''
         Saves a screenshot of a webpage given the parameters. Parameters include whether r not to include the 
         scrollbar, path to save the image, and the web driver to use.
@@ -113,7 +108,7 @@ def save_screenshot(driver = webdriver.Chrome, file_name: Path = Path('./img.png
     driver.get(url)
     # add the site to set of visited sites
     visited_pages.add(url)
-    time.sleep(5)
+    asyncio.sleep(5)
     padding = 100
     
     file_name = str(check_name(file_name=file_name))
@@ -146,7 +141,7 @@ def check_name(file_name: Path, copy: int = 2) -> str:
         copy += 1    
     return file_name
 
-def get_links(path: Path, driver: webdriver.Chrome):
+async def get_links(path: Path, driver: webdriver.Chrome):
     ignored_exceptions = (NoSuchElementException, StaleElementReferenceException,)
     # get all links in the page by getting anchor tags then their hrefs and text, skiping links to external origins.
     anchors = driver.find_elements_by_tag_name('a')
@@ -195,33 +190,29 @@ def get_links(path: Path, driver: webdriver.Chrome):
             name = ref[1] if ref[1] else ref[0].split('/')[-1]
             photo_name: Path = path.joinpath(f'{name}.png')
             # photo_name: Path = path.joinpath(f'link name: {name}.png')
-            save_screenshot(driver=driver, file_name=photo_name, url= ref[0], include_scrollbar= False)
+            await save_screenshot(driver=driver, file_name=photo_name, url= ref[0], include_scrollbar= False)
             # Recursivel  y traverse the site for all anchor tags leading to a link
             #get_links(path=path, driver=driver)
     
-def check_site(url: str, path: Path, driver: webdriver.Chrome):
-    hostname = urlparse(url).hostname
-    dir: Path = make_dir(parent=path, name=hostname)
-    home_pic = dir.joinpath('home.png')
-    save_screenshot(driver=driver, file_name= home_pic, url=url, include_scrollbar=False)
-    get_links(path=dir, driver=driver)
+async def check_site(url: str, path: Path, driver: webdriver.Chrome):
+    try:
+        hostname = urlparse(url).hostname
+        dir: Path = make_dir(parent=path, name=hostname)
+        home_pic = dir.joinpath('home.png')
+        await save_screenshot(driver=driver, file_name= home_pic, url=url, include_scrollbar=False)
+        await get_links(path=dir, driver=driver)
+    except Exception as e:
+        # print(f"Failed to get site: {site} \n\t{e}")
+        # TODO: log the error properly here
+        msg = f'Error occured tying to get site {url}. more info:\n\t{e}'
+        log.error(msg=msg, exc_info=True)
+        # log.error()
+        offline_sites.append(url)
+        # raise e
     
-def check_sites(driver: webdriver.Chrome, sites: List[str], path: Path):
-    # Go through the list of sites
-    for site in sites:
-        try:
-            print(f"Getting site: {site}")
-            # driver.save_screenshot(path)
-            # Save a snapshot of the site page inside todays folder
-            check_site(url=site, path=path, driver = driver)
-        except Exception as e:
-            print(f"Failed to get site: {site} \n\t{e}")
-            # TODO: log the error properly here
-            msg = f'Error occured tying to get site {site}. more info:\n\t{e}'
-            log.error(msg=msg, exc_info=True)
-            # log.error()
-            offline_sites.append(site)
-            # raise e
+async def check_sites(driver: webdriver.Chrome, sites: List[str], path: Path):
+    coros = [asyncio.create_task(check_site(url=site, path=path, driver = driver)) for site in sites]
+    await asyncio.wait(coros)
     driver.close()
     # Save the offline sites in a json file
     if offline_sites:
