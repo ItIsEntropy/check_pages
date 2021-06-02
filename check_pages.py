@@ -82,7 +82,7 @@ def init(websites: List[str] = None):
     # Make a new folder with todays date - year (%Y), month(%m), and day(%d)
     today = (datetime.datetime.now().strftime("%Y%m%d"))
     todays_photos: Path = make_dir(screenshots, name=today)
-    asyncio.run(check_sites(driver = driver, sites=targets[:2], path=todays_photos))
+    asyncio.run(check_sites(driver = driver, sites=targets, path=todays_photos))
 
 def make_dir(parent: str, name: str) -> Path:
     '''
